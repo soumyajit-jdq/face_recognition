@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition — Live Verification</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            padding: 1.2rem 2rem;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.3);
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        header p {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-top: 0.3rem;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            padding: 2rem;
+            max-width: 1100px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        /* ── Webcam Card ── */
+        .card {
+            background: linear-gradient(145deg, #1e1e2f, #1a1a2a);
+            border: 1px solid rgba(99, 102, 241, 0.15);
+            border-radius: 16px;
+            padding: 1.5rem;
+            flex: 1;
+            min-width: 420px;
+            max-width: 560px;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #c4b5fd;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .video-wrapper {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 4/3;
+        }
+
+        video, #snapshot {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        #snapshot { display: none; }
+
+        .overlay-result {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 1rem;
+            background: linear-gradient(transparent, rgba(0,0,0,0.85));
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .overlay-result.show { opacity: 1; }
+        .overlay-result.verified { color: #4ade80; }
+        .overlay-result.unverified { color: #f87171; }
+        .overlay-result.error { color: #fbbf24; }
+
+        .btn-row {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        button {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            color: #fff;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(99,102,241,0.4); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        .btn-secondary {
+            background: rgba(99, 102, 241, 0.1);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.25);
+        }
+        .btn-secondary:hover { background: rgba(99, 102, 241, 0.2); }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
+
+        /* ── Status Panel ── */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-item {
+            background: rgba(99, 102, 241, 0.06);
+            border: 1px solid rgba(99, 102, 241, 0.1);
+            border-radius: 10px;
+            padding: 0.75rem;
+        }
+
+        .status-item .label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+
+        .status-item .value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .status-item .value.ok { color: #4ade80; }
+        .status-item .value.fail { color: #f87171; }
+
+        /* ── Face List ── */
+        .face-list {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .face-list li {
+            background: rgba(99, 102, 241, 0.12);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 8px;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #c4b5fd;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .face-list li .delete-btn {
+            background: none;
+            border: none;
+            color: #f87171;
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 0;
+            flex: unset;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+        .face-list li .delete-btn:hover { opacity: 1; }
+
+        /* ── Register Section ── */
+        .register-form {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .register-form input[type="text"] {
+            flex: 1;
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            background: rgba(15, 15, 26, 0.8);
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+        }
+        .register-form input:focus { outline: none; border-color: #6366f1; }
+
+        /* ── Log ── */
+        .log {
+            margin-top: 1rem;
+            max-height: 180px;
+            overflow-y: auto;
+            font-size: 0.78rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: #94a3b8;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 0.75rem;
+        }
+
+        .log .entry { margin-bottom: 0.3rem; }
+        .log .entry.success { color: #4ade80; }
+        .log .entry.error { color: #f87171; }
+        .log .entry.info { color: #60a5fa; }
+
+        /* ── Spinner ── */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: #818cf8;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 900px) {
+            .container { flex-direction: column; }
+            .card { min-width: unset; max-width: unset; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔐 Face Recognition</h1>
+        <p>Live webcam verification powered by DeepFace + Facenet</p>
+    </header>
+
+    <div class="container">
+        <!-- Left: Webcam -->
+        <div class="card">
+            <h2>📹 Live Camera</h2>
+            <div class="video-wrapper">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="snapshot" style="display:none;"></canvas>
+                <div id="overlayResult" class="overlay-result"></div>
+            </div>
+            <div class="btn-row">
+                <button id="btnIdentify" class="btn-primary" disabled>🔍 Identify Face</button>
+                <button id="btnStartCam" class="btn-secondary">📷 Start Camera</button>
+            </div>
+            <div class="register-form">
+                <input type="text" id="registerName" placeholder="Name to register..." />
+                <button id="btnRegister" class="btn-secondary" disabled>➕ Register</button>
+            </div>
+        </div>
+
+        <!-- Right: Status Panel -->
+        <div class="card" style="max-width: 380px; min-width: 320px;">
+            <h2>📊 Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="label">API Status</div>
+                    <div class="value" id="apiStatus">checking...</div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Model</div>
+                    <div class="value" id="modelName">—</div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Detector</div>
+                    <div class="value" id="detectorName">—</div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Registered</div>
+                    <div class="value" id="faceCount">—</div>
+                </div>
+            </div>
+
+            <h2>👤 Registered Faces</h2>
+            <ul class="face-list" id="faceList">
+                <li style="color:#64748b;">Loading...</li>
+            </ul>
+
+            <h2 style="margin-top: 1.2rem;">📋 Log</h2>
+            <div class="log" id="logPanel"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = window.location.origin + '/api/v1';
+        const webcamEl = document.getElementById('webcam');
+        const canvasEl = document.getElementById('snapshot');
+        const overlayEl = document.getElementById('overlayResult');
+        const btnIdentify = document.getElementById('btnIdentify');
+        const btnStartCam = document.getElementById('btnStartCam');
+        const btnRegister = document.getElementById('btnRegister');
+        const registerNameEl = document.getElementById('registerName');
+        const logPanel = document.getElementById('logPanel');
+
+        let stream = null;
+
+        // ── Logging ──
+        function log(msg, type = '') {
+            const entry = document.createElement('div');
+            entry.className = 'entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logPanel.prepend(entry);
+        }
+
+        // ── Health Check ──
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API}/health`);
+                const data = await res.json();
+                document.getElementById('apiStatus').textContent = data.status;
+                document.getElementById('apiStatus').className = 'value ' + (data.status === 'ok' ? 'ok' : 'fail');
+                document.getElementById('modelName').textContent = data.model_name;
+                document.getElementById('detectorName').textContent = data.detector_backend;
+                document.getElementById('faceCount').textContent = data.registered_faces;
+                log('API connected', 'success');
+            } catch (e) {
+                document.getElementById('apiStatus').textContent = 'offline';
+                document.getElementById('apiStatus').className = 'value fail';
+                log('API unreachable: ' + e.message, 'error');
+            }
+        }
+
+        // ── Face List ──
+        async function loadFaces() {
+            try {
+                const res = await fetch(`${API}/faces`);
+                const data = await res.json();
+                const list = document.getElementById('faceList');
+                list.innerHTML = '';
+                if (data.faces.length === 0) {
+                    list.innerHTML = '<li style="color:#64748b;">No faces registered</li>';
+                } else {
+                    data.faces.forEach(name => {
+                        const li = document.createElement('li');
+                        li.textContent = name;
+                        const del = document.createElement('button');
+                        del.className = 'delete-btn';
+                        del.textContent = '✕';
+                        del.title = 'Delete ' + name;
+                        del.onclick = () => deleteFace(name);
+                        li.appendChild(del);
+                        list.appendChild(li);
+                    });
+                }
+                document.getElementById('faceCount').textContent = data.count;
+            } catch (e) {
+                log('Failed to load faces: ' + e.message, 'error');
+            }
+        }
+
+        // ── Delete Face ──
+        async function deleteFace(name) {
+            if (!confirm(`Delete face "${name}"?`)) return;
+            try {
+                await fetch(`${API}/faces/${name}`, { method: 'DELETE' });
+                log(`Deleted: ${name}`, 'info');
+                loadFaces();
+            } catch (e) {
+                log('Delete failed: ' + e.message, 'error');
+            }
+        }
+
+        // ── Webcam ──
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: 'user' }
+                });
+                webcamEl.srcObject = stream;
+                btnIdentify.disabled = false;
+                btnRegister.disabled = false;
+                btnStartCam.textContent = '⏹ Stop Camera';
+                btnStartCam.className = 'btn-danger';
+                log('Camera started', 'success');
+            } catch (e) {
+                log('Camera error: ' + e.message, 'error');
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            webcamEl.srcObject = null;
+            btnIdentify.disabled = true;
+            btnRegister.disabled = true;
+            btnStartCam.textContent = '📷 Start Camera';
+            btnStartCam.className = 'btn-secondary';
+            log('Camera stopped', 'info');
+        }
+
+        btnStartCam.addEventListener('click', () => {
+            if (stream) stopCamera();
+            else startCamera();
+        });
+
+        // ── Capture Frame ──
+        function captureFrame() {
+            const ctx = canvasEl.getContext('2d');
+            canvasEl.width = webcamEl.videoWidth;
+            canvasEl.height = webcamEl.videoHeight;
+            ctx.drawImage(webcamEl, 0, 0);
+            return new Promise(resolve => {
+                canvasEl.toBlob(resolve, 'image/jpeg', 0.92);
+            });
+        }
+
+        // ── Show Overlay ──
+        function showOverlay(text, type) {
+            overlayEl.textContent = text;
+            overlayEl.className = 'overlay-result show ' + type;
+            setTimeout(() => { overlayEl.className = 'overlay-result'; }, 4000);
+        }
+
+        // ── Identify ──
+        btnIdentify.addEventListener('click', async () => {
+            if (!stream) return;
+            btnIdentify.disabled = true;
+            btnIdentify.innerHTML = '<span class="spinner"></span>Identifying...';
+            log('Capturing frame for identification...', 'info');
+
+            try {
+                const blob = await captureFrame();
+                const form = new FormData();
+                form.append('image', blob, 'probe.jpg');
+
+                const res = await fetch(`${API}/identify`, { method: 'POST', body: form });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showOverlay(data.detail || 'Error', 'error');
+                    log('Error: ' + (data.detail || res.statusText), 'error');
+                } else if (data.identified) {
+                    showOverlay(`✅ VERIFIED: ${data.best_match} (${data.distance.toFixed(4)})`, 'verified');
+                    log(`VERIFIED: ${data.best_match} — distance=${data.distance.toFixed(4)} threshold=${data.threshold}`, 'success');
+                } else {
+                    const closest = data.matches.length > 0 ? data.matches[0].name : 'none';
+                    const dist = data.matches.length > 0 ? data.matches[0].distance.toFixed(4) : 'N/A';
+                    showOverlay(`❌ UNVERIFIED (closest: ${closest}, d=${dist})`, 'unverified');
+                    log(`UNVERIFIED — closest=${closest} distance=${dist}`, 'error');
+                }
+            } catch (e) {
+                showOverlay('Request failed', 'error');
+                log('Identify error: ' + e.message, 'error');
+            }
+
+            btnIdentify.disabled = false;
+            btnIdentify.innerHTML = '🔍 Identify Face';
+        });
+
+        // ── Register ──
+        btnRegister.addEventListener('click', async () => {
+            const name = registerNameEl.value.trim();
+            if (!name) { alert('Enter a name first'); return; }
+            if (!stream) return;
+
+            btnRegister.disabled = true;
+            btnRegister.innerHTML = '<span class="spinner"></span>Registering...';
+            log(`Registering face as "${name}"...`, 'info');
+
+            try {
+                const blob = await captureFrame();
+                const form = new FormData();
+                form.append('name', name);
+                form.append('image', blob, `${name}.jpg`);
+
+                const res = await fetch(`${API}/register`, { method: 'POST', body: form });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showOverlay(`✅ Registered: ${name}`, 'verified');
+                    log(`Registered: ${name}`, 'success');
+                    registerNameEl.value = '';
+                    loadFaces();
+                } else {
+                    showOverlay(data.detail || 'Registration failed', 'error');
+                    log('Registration failed: ' + (data.detail || res.statusText), 'error');
+                }
+            } catch (e) {
+                log('Register error: ' + e.message, 'error');
+            }
+
+            btnRegister.disabled = false;
+            btnRegister.innerHTML = '➕ Register';
+        });
+
+        // ── Init ──
+        checkHealth();
+        loadFaces();
+        // Auto-start camera
+        startCamera();
+    </script>
+</body>
+</html>

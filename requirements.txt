@@ -1,0 +1,5 @@
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+# Optional (more accurate, deep-learning based) - uncomment to enable Method 2
+deepface>=0.0.93
+tf-keras
