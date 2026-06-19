@@ -97,7 +97,6 @@ Run this as a separate service and call its REST API from your main backend:
 ```python
 import requests
 
-# From your IGRS / JustifAI backend
 response = requests.post(
     "http://localhost:8000/api/v1/identify",
     files={"image": open("probe.jpg", "rb")}
