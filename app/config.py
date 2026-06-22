@@ -2,7 +2,6 @@
 config.py — Application settings loaded from environment variables or .env file.
 """
 
-import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -15,10 +14,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     """Application configuration. Override via environment variables or .env file."""
 
-    # --- Paths ---
-    KNOWN_FACES_DIR: str = Field(
-        default=str(BASE_DIR / "known_faces"),
-        description="Directory to store registered face images",
+    # --- Database (Prisma reads DATABASE_URL directly from .env) ---
+    DATABASE_URL: str = Field(
+        default="postgresql://localhost:5432/face_recog_db",
+        description="PostgreSQL connection URL (used by Prisma)",
     )
 
     # --- DeepFace Model ---

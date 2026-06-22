@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.config import settings
+from app.database import prisma
 from app.models import (
     ErrorResponse,
     FaceListResponse,
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Face Recognition"])
 
 
-# ──────────────── Helpers ────────────────
+# Helpers
 
 
 def _validate_image(file: UploadFile) -> None:
@@ -53,7 +54,7 @@ async def _read_image_bytes(file: UploadFile) -> bytes:
     return contents
 
 
-# ──────────────── Health ────────────────
+# Health
 
 
 @router.get(
@@ -63,7 +64,7 @@ async def _read_image_bytes(file: UploadFile) -> bytes:
     description="Returns service health, model status, and registered face count.",
 )
 async def health_check():
-    faces = face_service.list_faces()
+    faces = await face_service.list_faces(prisma)
     return HealthResponse(
         status="ok" if face_service.model_loaded else "degraded",
         model_loaded=face_service.model_loaded,
@@ -73,7 +74,7 @@ async def health_check():
     )
 
 
-# ──────────────── Register ────────────────
+# Register
 
 
 @router.post(
@@ -92,7 +93,7 @@ async def register_face(
     image_bytes = await _read_image_bytes(image)
 
     try:
-        result = face_service.register_face(name=name.strip(), image_bytes=image_bytes)
+        result = await face_service.register_face(name=name.strip(), image_bytes=image_bytes, db=prisma)
         return RegisterResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -104,7 +105,7 @@ async def register_face(
         )
 
 
-# ──────────────── Verify (1:1) ────────────────
+# Verify (1:1)
 
 
 @router.post(
@@ -124,7 +125,7 @@ async def verify_faces(
     bytes2 = await _read_image_bytes(image2)
 
     try:
-        result = face_service.verify_faces(image1_bytes=bytes1, image2_bytes=bytes2)
+        result = await face_service.verify_faces(image1_bytes=bytes1, image2_bytes=bytes2)
         return VerifyResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -136,7 +137,7 @@ async def verify_faces(
         )
 
 
-# ──────────────── Identify (1:N) ────────────────
+# Identify (1:N)
 
 
 @router.post(
@@ -153,7 +154,7 @@ async def identify_face(
     image_bytes = await _read_image_bytes(image)
 
     try:
-        result = face_service.identify_face(image_bytes=image_bytes)
+        result = await face_service.identify_face(image_bytes=image_bytes, db=prisma)
         return IdentifyResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -165,7 +166,7 @@ async def identify_face(
         )
 
 
-# ──────────────── Face List ────────────────
+# Face List
 
 
 @router.get(
@@ -175,11 +176,11 @@ async def identify_face(
     description="Returns all registered identity names.",
 )
 async def list_faces():
-    faces = face_service.list_faces()
+    faces = await face_service.list_faces(prisma)
     return FaceListResponse(count=len(faces), faces=faces)
 
 
-# ──────────────── Delete ────────────────
+# Delete
 
 
 @router.delete(
@@ -189,7 +190,7 @@ async def list_faces():
     responses={404: {"model": ErrorResponse}},
 )
 async def delete_face(name: str):
-    deleted = face_service.delete_face(name.strip())
+    deleted = await face_service.delete_face(name.strip(), prisma)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

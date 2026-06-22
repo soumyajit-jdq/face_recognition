@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.database import init_db, close_db, prisma
 from app.routes import router
 from app.service import face_service
 
@@ -36,17 +37,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Startup: warm up DeepFace model. Shutdown: cleanup."""
+    """Startup: init DB, warm up DeepFace model. Shutdown: cleanup."""
     logger.info("=" * 60)
     logger.info("Face Recognition API starting up...")
     logger.info("Model: %s | Detector: %s | Metric: %s",
                 settings.MODEL_NAME, settings.DETECTOR_BACKEND, settings.DISTANCE_METRIC)
-    logger.info("Known faces dir: %s", settings.KNOWN_FACES_DIR)
+    logger.info("Database: %s", settings.DATABASE_URL[:50] + "...")
+
+    # Connect Prisma client to Neon PostgreSQL
+    await init_db()
 
     # Preload model into memory
     face_service.warmup()
 
-    registered = face_service.list_faces()
+    registered = await face_service.list_faces(prisma)
     logger.info("Registered faces: %d — %s", len(registered), registered)
     logger.info("API ready at http://%s:%d", settings.HOST, settings.PORT)
     logger.info("Live webcam UI at http://%s:%d/live", settings.HOST, settings.PORT)
@@ -55,6 +59,8 @@ async def lifespan(application: FastAPI):
 
     yield  # App runs here
 
+    # Gracefully disconnect Prisma
+    await close_db()
     logger.info("Shutting down Face Recognition API...")
 
 

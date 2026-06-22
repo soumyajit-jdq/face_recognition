@@ -3,20 +3,21 @@ service.py — Core face recognition business logic.
 
 Wraps DeepFace operations behind a clean service interface with:
 - Model preloading on startup for fast inference
-- Thread-safe file I/O
+- Prisma / Neon PostgreSQL storage for registered face images
 - Image preprocessing (CLAHE contrast enhancement)
 - Face detection validation before registration
 """
 
+import base64
 import logging
 import os
 import tempfile
 import threading
-from pathlib import Path
 
 import cv2
 import numpy as np
 from deepface import DeepFace
+from prisma import Prisma
 
 from app.config import settings
 
@@ -42,9 +43,6 @@ class FaceRecognitionService:
             return
         self._initialized = True
         self._model_loaded = False
-        self._io_lock = threading.Lock()
-        self._known_dir = Path(settings.KNOWN_FACES_DIR)
-        self._known_dir.mkdir(parents=True, exist_ok=True)
         logger.info(
             "FaceRecognitionService created | model=%s detector=%s metric=%s",
             settings.MODEL_NAME,
@@ -52,13 +50,12 @@ class FaceRecognitionService:
             settings.DISTANCE_METRIC,
         )
 
-    # ─────────────── Startup ───────────────
+    # Startup
 
     def warmup(self) -> None:
         """Preload the DeepFace model into memory so first request is fast."""
         logger.info("Warming up DeepFace model '%s'...", settings.MODEL_NAME)
         try:
-            # DeepFace.build_model loads and caches the model
             DeepFace.build_model(settings.MODEL_NAME)
             self._model_loaded = True
             logger.info("Model '%s' loaded successfully.", settings.MODEL_NAME)
@@ -70,7 +67,7 @@ class FaceRecognitionService:
     def model_loaded(self) -> bool:
         return self._model_loaded
 
-    # ─────────────── Helpers ───────────────
+    # Helpers
 
     @staticmethod
     def _preprocess_image(image: np.ndarray) -> np.ndarray:
@@ -91,11 +88,38 @@ class FaceRecognitionService:
             raise ValueError("Could not decode image from uploaded bytes.")
         return image
 
-    def _save_temp_image(self, image: np.ndarray) -> str:
+    @staticmethod
+    def _image_to_jpeg_bytes(image: np.ndarray) -> bytes:
+        """Encode an OpenCV image to JPEG bytes for DB storage."""
+        success, buf = cv2.imencode(".jpg", image)
+        if not success:
+            raise ValueError("Failed to encode image to JPEG.")
+        return buf.tobytes()
+
+    @staticmethod
+    def _save_temp_image(image: np.ndarray) -> str:
         """Save image to a temp file and return the path."""
         fd, path = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
         cv2.imwrite(path, image)
+        return path
+
+    @staticmethod
+    def _to_raw_bytes(data) -> bytes:
+        """Convert Prisma Base64, base64 str, or raw bytes to raw bytes."""
+        if isinstance(data, bytes):
+            return data
+        # Prisma Base64 object or base64-encoded string — decode via str
+        return base64.b64decode(str(data))
+
+    @staticmethod
+    def _save_bytes_temp(image_data) -> str:
+        """Write image data (bytes, str, or Prisma Base64) to a temp file."""
+        raw = FaceRecognitionService._to_raw_bytes(image_data)
+        fd, path = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        with open(path, "wb") as f:
+            f.write(raw)
         return path
 
     def _detect_face(self, image: np.ndarray) -> bool:
@@ -113,22 +137,17 @@ class FaceRecognitionService:
         finally:
             os.unlink(temp_path)
 
-    # ─────────────── Public API ───────────────
+    # Public API — all DB operations use the Prisma client
 
-    def list_faces(self) -> list[str]:
-        """Return names of all registered faces."""
-        extensions = set(settings.ALLOWED_EXTENSIONS)
-        names = []
-        with self._io_lock:
-            for f in sorted(self._known_dir.iterdir()):
-                if f.suffix.lower() in extensions:
-                    names.append(f.stem)
-        return names
+    async def list_faces(self, db: Prisma) -> list[str]:
+        """Return names of all registered faces from the database."""
+        faces = await db.face.find_many(order={"name": "asc"})
+        return [f.name for f in faces]
 
-    def register_face(self, name: str, image_bytes: bytes) -> dict:
+    async def register_face(self, name: str, image_bytes: bytes, db: Prisma) -> dict:
         """
         Register a face image under the given name.
-        Validates that a face is detectable before saving.
+        Validates that a face is detectable, then stores in PostgreSQL via Prisma.
         """
         image = self._bytes_to_image(image_bytes)
         image = self._preprocess_image(image)
@@ -140,18 +159,28 @@ class FaceRecognitionService:
                 "Ensure the image has a clear, front-facing face with good lighting."
             )
 
-        # Save to known_faces/
-        out_path = self._known_dir / f"{name}.jpg"
-        with self._io_lock:
-            cv2.imwrite(str(out_path), image)
+        # Encode processed image to JPEG bytes for storage
+        jpeg_bytes = self._image_to_jpeg_bytes(image)
 
-        logger.info("Registered face '%s' -> %s", name, out_path)
+        # Prisma Bytes fields require Base64-encoded data
+        b64_data = base64.b64encode(jpeg_bytes).decode("ascii")
+
+        # Upsert: update if name exists, insert otherwise
+        await db.face.upsert(
+            where={"name": name},
+            data={
+                "create": {"name": name, "image_data": b64_data},
+                "update": {"image_data": b64_data},
+            },
+        )
+        logger.info("Registered/updated face '%s' in database.", name)
+
         return {"status": "registered", "name": name, "message": "Face registered successfully"}
 
-    def verify_faces(self, image1_bytes: bytes, image2_bytes: bytes) -> dict:
+    async def verify_faces(self, image1_bytes: bytes, image2_bytes: bytes) -> dict:
         """
         1:1 verification — compare two face images.
-        Returns verification result with distance and threshold.
+        No DB needed — both images are uploaded directly.
         """
         img1 = self._preprocess_image(self._bytes_to_image(image1_bytes))
         img2 = self._preprocess_image(self._bytes_to_image(image2_bytes))
@@ -182,12 +211,14 @@ class FaceRecognitionService:
             os.unlink(path1)
             os.unlink(path2)
 
-    def identify_face(self, image_bytes: bytes) -> dict:
+    async def identify_face(self, image_bytes: bytes, db: Prisma) -> dict:
         """
-        1:N identification — compare a probe face against all registered faces.
-        Returns the best match and all comparison results.
+        1:N identification — compare a probe face against all registered faces in the DB.
+        Loads reference images from PostgreSQL via Prisma, writes to temp files for DeepFace.
         """
-        registered = self.list_faces()
+        # Load all registered faces from DB
+        registered = await db.face.find_many(order={"name": "asc"})
+
         if not registered:
             raise ValueError("No registered faces found. Register a face first.")
 
@@ -196,12 +227,16 @@ class FaceRecognitionService:
 
         matches = []
         threshold = 0.0
+        temp_ref_paths = []
 
         try:
-            for name in registered:
-                ref_path = str(self._known_dir / f"{name}.jpg")
+            for face in registered:
+                # _save_bytes_temp handles Prisma Base64 → raw bytes internally
+                ref_path = self._save_bytes_temp(face.image_data)
+                temp_ref_paths.append(ref_path)
+
                 try:
-                    result = DeepFace.verify(
+                    verify_result = DeepFace.verify(
                         img1_path=ref_path,
                         img2_path=probe_path,
                         model_name=settings.MODEL_NAME,
@@ -209,17 +244,22 @@ class FaceRecognitionService:
                         distance_metric=settings.DISTANCE_METRIC,
                         enforce_detection=True,
                     )
-                    threshold = result["threshold"]
+                    threshold = verify_result["threshold"]
                     matches.append({
-                        "name": name,
-                        "distance": round(result["distance"], 6),
-                        "verified": result["verified"],
+                        "name": face.name,
+                        "distance": round(verify_result["distance"], 6),
+                        "verified": verify_result["verified"],
                     })
                 except ValueError:
-                    logger.warning("Face not detected in reference '%s' or probe", name)
+                    logger.warning("Face not detected in reference '%s' or probe", face.name)
                     continue
         finally:
             os.unlink(probe_path)
+            for p in temp_ref_paths:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
         # Sort by distance (best match first)
         matches.sort(key=lambda m: m["distance"])
@@ -236,18 +276,14 @@ class FaceRecognitionService:
             "model": settings.MODEL_NAME,
         }
 
-    def delete_face(self, name: str) -> bool:
-        """Delete a registered face by name. Returns True if deleted."""
-        extensions = settings.ALLOWED_EXTENSIONS
-        deleted = False
-        with self._io_lock:
-            for ext in extensions:
-                path = self._known_dir / f"{name}{ext}"
-                if path.exists():
-                    path.unlink()
-                    deleted = True
-                    logger.info("Deleted face '%s' (%s)", name, path)
-        return deleted
+    async def delete_face(self, name: str, db: Prisma) -> bool:
+        """Delete a registered face by name from the database."""
+        try:
+            await db.face.delete(where={"name": name})
+            logger.info("Deleted face '%s' from database.", name)
+            return True
+        except Exception:
+            return False
 
 
 # Module-level singleton for easy import

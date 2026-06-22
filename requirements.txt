@@ -1,5 +1,15 @@
 opencv-contrib-python>=4.8.0
 numpy>=1.24.0
-# Optional (more accurate, deep-learning based) - uncomment to enable Method 2
 deepface>=0.0.93
 tf-keras
+
+# API server
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# Database (PostgreSQL)
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
