@@ -1,10 +1,10 @@
-"""
-main.py — FastAPI application entrypoint.
-
-Run with:
-    python -m app.main
-    uvicorn app.main:app --reload
-"""
+import os
+# Optimize TensorFlow memory usage and threads (crucial for 512MB RAM containers like Render)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_NUM_INTEROP_THREADS"] = "1"
+os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 import logging
 import sys
@@ -20,6 +20,7 @@ from app.config import settings
 from app.database import init_db, close_db, prisma
 from app.routes import router
 from app.service import face_service
+
 
 
 # ──────────────── Logging ────────────────
@@ -47,8 +48,12 @@ async def lifespan(application: FastAPI):
     # Connect Prisma client to Neon PostgreSQL
     await init_db()
 
-    # Preload model into memory
-    face_service.warmup()
+    # Preload model into memory (optional based on environment variable)
+    if os.getenv("SKIP_WARMUP", "false").lower() == "true":
+        logger.info("Skipping model warmup on startup to conserve memory.")
+    else:
+        face_service.warmup()
+
 
     registered = await face_service.list_faces(prisma)
     logger.info("Registered faces: %d — %s", len(registered), registered)
