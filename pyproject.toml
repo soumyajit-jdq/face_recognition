@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "face-recognition-system"
+version = "0.1.0"
+description = "Face Recognition API with FastAPI, DeepFace, and Prisma"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+opencv-contrib-python = ">=4.8.0"
+numpy = ">=1.24.0"
+deepface = ">=0.0.93"
+tf-keras = "*"
+fastapi = ">=0.110.0"
+uvicorn = { extras = ["standard"], version = ">=0.29.0" }
+python-multipart = ">=0.0.9"
+pydantic-settings = ">=2.2.0"
+python-dotenv = ">=1.0.0"
+prisma = ">=0.15.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
