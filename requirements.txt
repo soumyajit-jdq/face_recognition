@@ -10,6 +10,6 @@ python-multipart>=0.0.9
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
 
-# Database (PostgreSQL)
-sqlalchemy[asyncio]>=2.0.0
-asyncpg>=0.29.0
+# Database (Prisma)
+prisma>=0.15.0
+
